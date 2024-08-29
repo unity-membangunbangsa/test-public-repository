@@ -1,0 +1,77 @@
+name: Code Scanning
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  preparing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Creating Project Template
+        id: create-project
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://sonar.renify.id/api/v2/dop-translation/bound-projects"
+          method: "POST"
+          bearerToken: ${{ secrets.BEARER_TOKEN }}
+          customHeaders: '{"Content-Type": "application/json"}'
+          data: '{"projectKey": "${{ github.event.repository.name }}/${{ github.event.pull_request.base.ref }}", "projectName": "${{ github.event.repository.name }}/${{ github.event.pull_request.base.ref }}", "devOpsPlatformSettingId": "${{ secrets.devOpsPlatformSettingId }}", "repositoryIdentifier": "unity-membangunbangsa/${{ github.event.repository.name }}", "monorepo": "false"}'
+
+      - name: Get Project ID
+        id: set_var
+        run: echo "projectId=${{ fromJson(steps.create-project.outputs.response).projectId }}" >> $GITHUB_ENV
+
+      - name: Creating Link to Project
+        id: create-link
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://sonar.renify.id/api/project_links/create?name=view-issues&projectId=${{ env.projectId}}&url=https://sonar.renify.id/projects/issues"
+          method: "POST"
+          bearerToken: ${{ secrets.BEARER_TOKEN }}
+          customHeaders: "{}"
+
+  scanning:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Branch
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          distribution: "temurin"
+          java-version: "11"
+
+      - name: Cache SonarQube Package
+        uses: actions/cache@v3
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar-${{ hashFiles('**/sonar-project.properties') }}
+          restore=keys: ${{ runner.os }}-sonar
+
+      - name: Run Scanner
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          sonar-scanner \
+          -Dsonar.projectKey=your_project_key \
+          -Dsonar.sources=. \
+          -Dsonar.host.url=https://your-sonarqube-server.com \
+          -Dsonar.login=$SONAR_TOKEN \
+          -Dsonar.pullrequest.branch=${{ github.head_ref }} \
+          -Dsonar.pullrequest.key=${{ github.event.pull_request.number }} \
+          -Dsonar.pullrequest.base=${{ github.base_ref }} \
+          -Dsonar.pullrequest.provider=GitHub \
+          -Dsonar.pullrequest.github.repository=${{ github.repository }}
+
+      - name: Creating Comment
+        id: create-comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            Proses Scanning telah selesai, silahkan mengunjungi link berikut untuk melihat hasil:
